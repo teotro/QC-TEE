@@ -121,68 +121,101 @@ QC-TEE/
 The paper's fidelity/correctness numbers come from noise-model simulation of
 21 QASMBench circuits on IBM `ibm_perth`, `ibm_algiers`, and the Aer
 simulator (Table II). That evaluation is *software*, orthogonal to this
-repository — this repo is the RTL that will run inside the fridge. To
-reproduce the RTL side you can:
+repository — this repo is the RTL that will run inside the fridge.
 
-### 1. Simulate the top design
+The flow below assumes **Xilinx Vivado (2020.1 or newer)** for both
+simulation (`xsim`) and synthesis. Vivado is used because the design is
+mixed-language: the AES core is VHDL and everything else is Verilog, and the
+FPGA wrapper `uart_top_no_fifo.v` instantiates the Xilinx `BUFG` primitive.
 
-Any Verilog simulator that supports mixed-language (Verilog + VHDL)
-simulation — e.g. **Vivado xsim**, **ModelSim/Questa**, or **VCS** — will
-work. Icarus Verilog is *not* enough on its own because the AES core is VHDL.
+### 1. Simulate the top design with `xsim`
 
-Example, ModelSim/Questa, from the repo root:
+Source Vivado's `settings64.sh` first, then from the repo root:
 
-```tcl
-vlib work
-# VHDL AES core
-vcom -work work AES/src/AES_pkg.vhd
-vcom -work work AES/src/AES_map.vhd  AES/src/AES_invmap.vhd
-vcom -work work AES/src/AES_Sbox.vhd AES/src/AES_InvSbox.vhd
-vcom -work work AES/src/AES_SubBytes.vhd AES/src/AES_InvSubBytes.vhd
-vcom -work work AES/src/AES_ShiftRows.vhd AES/src/AES_InvShiftRows.vhd
-vcom -work work AES/src/AES_mul.vhd
-vcom -work work AES/src/AES_MixColumn.vhd AES/src/AES_InvMixColumn.vhd
-vcom -work work AES/src/AES_MixColumns.vhd AES/src/AES_InvMixColumns.vhd
-vcom -work work AES/src/AES_Combined_Round.vhd
-vcom -work work AES/src/AES_KeyUpdate.vhd
-vcom -work work AES/src/AES_EncDec_Datapath.vhd
-vcom -work work AES/src/AES_EncDec_Control.vhd
-vcom -work work AES/src/AES_EncDec.vhd
+```bash
+# ---- 1a. Compile the VHDL AES core ----
+xvhdl \
+  AES/src/AES_pkg.vhd \
+  AES/src/AES_map.vhd  AES/src/AES_invmap.vhd \
+  AES/src/AES_Sbox.vhd AES/src/AES_InvSbox.vhd \
+  AES/src/AES_SubBytes.vhd AES/src/AES_InvSubBytes.vhd \
+  AES/src/AES_ShiftRows.vhd AES/src/AES_InvShiftRows.vhd \
+  AES/src/AES_mul.vhd \
+  AES/src/AES_MixColumn.vhd AES/src/AES_InvMixColumn.vhd \
+  AES/src/AES_MixColumns.vhd AES/src/AES_InvMixColumns.vhd \
+  AES/src/AES_Combined_Round.vhd \
+  AES/src/AES_KeyUpdate.vhd \
+  AES/src/AES_EncDec_Datapath.vhd \
+  AES/src/AES_EncDec_Control.vhd \
+  AES/src/AES_EncDec.vhd
 
-# Verilog RTL
-vlog -work work +incdir+. +incdir+shake256 \
-    clog2.v shifter.v dec_enc_engine.v main_controller.v \
-    memory/mem_dual.v memory/mem_single.v \
-    fifo/fifo-orig.v \
-    shake256/keccak_top.v shake256/control_path.v shake256/data_path.v \
-    shake256/keccak_math.v shake256/state_ram.v shake256/stateram_inference.v \
-    shake256/transform.v shake256/rc.v shake256/keccak_pkg.v \
-    top_with_fifo.v \
-    tb/top_with_fifo_tb.v
+# ---- 1b. Compile the Verilog RTL ----
+xvlog -i . -i shake256 \
+  clog2.v shifter.v dec_enc_engine.v main_controller.v \
+  memory/mem_dual.v memory/mem_single.v \
+  fifo/fifo-orig.v \
+  shake256/keccak_pkg.v shake256/keccak_math.v \
+  shake256/rc.v shake256/transform.v \
+  shake256/state_ram.v shake256/stateram_inference.v \
+  shake256/data_path.v shake256/control_path.v shake256/keccak_top.v \
+  top_with_fifo.v \
+  tb/top_with_fifo_tb.v
 
-vsim -voptargs=+acc work.top_with_fifo_tb
-run -all
+# ---- 1c. Elaborate and run ----
+xelab -debug typical -L work work.top_with_fifo_tb -s tb_snapshot
+xsim tb_snapshot -R
 ```
 
-The testbench prints the number of cycles from `start_signal` to
-`dec_enc_done` and to `done_signal`.
+The testbench prints the cycle count between `start_signal`,
+`dec_enc_done`, and `done_signal`. A `top_with_fifo_tb.vcd` waveform is
+dumped in the working directory; open it with `xsim --gui` or any VCD
+viewer.
 
-### 2. Synthesize for a Xilinx FPGA (bring-up)
+### 2. Synthesize for a Xilinx FPGA with Vivado
 
 `uart_top_no_fifo.v` targets a Xilinx 7-series board (it instantiates a
-`BUFG` primitive). Add every file listed above **plus** `uart/txuart.v`,
-`uart/rxuart.v`, and `uart_top_no_fifo.v` as the top module in Vivado.
+`BUFG` primitive). Create a Vivado project (GUI or Tcl) and add:
 
-Board-independent constraints you must add:
-- `clk_p` → the board's system clock pin (100 MHz assumed; adjust
-  `CLK_SPEED` if different).
+- **Design sources (Verilog):** `top_with_fifo.v`, `uart_top_no_fifo.v`,
+  `main_controller.v`, `dec_enc_engine.v`, `shifter.v`, `clog2.v`,
+  `memory/mem_dual.v`, `memory/mem_single.v`, `fifo/fifo-orig.v`,
+  `uart/rxuart.v`, `uart/txuart.v`, and the entire `shake256/*.v` set.
+- **Design sources (VHDL, `work` library):** every file listed in
+  `AES/AES_EncDec_sources.txt` from `AES/src/`.
+- **Simulation sources:** `tb/top_with_fifo_tb.v` (plus any other TB from
+  `tb/` you want to try).
+- **Top module:** `uart_top_no_fifo`.
+- **Verilog include path:** repo root (for `` `include "clog2.v" ``) and
+  `shake256/` (for `keccak_pkg.v`).
+
+A minimal Tcl equivalent:
+
+```tcl
+create_project qc_tee ./qc_tee_proj -part xc7a100tcsg324-1 -force
+add_files -norecurse {
+  top_with_fifo.v uart_top_no_fifo.v main_controller.v dec_enc_engine.v
+  shifter.v clog2.v memory/mem_dual.v memory/mem_single.v
+  fifo/fifo-orig.v uart/rxuart.v uart/txuart.v
+}
+add_files -norecurse [glob shake256/*.v]
+add_files -norecurse [glob AES/src/*.vhd]
+add_files -fileset sim_1 -norecurse tb/top_with_fifo_tb.v
+set_property include_dirs [list [pwd] [pwd]/shake256] [get_filesets sources_1]
+set_property top uart_top_no_fifo [get_filesets sources_1]
+update_compile_order -fileset sources_1
+launch_runs synth_1 -jobs 4
+```
+
+Constraints you must supply in an XDC file for your board:
+- `clk_p` → system clock pin (100 MHz assumed; change `CLK_SPEED` in
+  `uart_top_no_fifo.v` if your board differs).
 - `uart_rx`, `uart_tx` → USB-UART pins.
-- `output_switches_wire[6:0]`, `flag1..3` → to available user IO / LEDs
-  (7 RF-switch drive outputs).
+- `output_switches_wire[6:0]`, `flag1..3` → user IO / LEDs (7 RF-switch
+  drive outputs plus 3 debug flags).
 
 ### 3. Drive the FPGA from a host PC
 
-With the design programmed onto the board, from `python/`:
+With the bitstream programmed onto the board, from `python/`:
 
 ```bash
 pip install pyserial pycryptodome bitstring
