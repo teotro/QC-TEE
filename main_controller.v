@@ -335,6 +335,10 @@ always @(*)
         end
 
         data_0: begin
+            // FIXME: The four 32-bit words fed to SHAKE below (data_0..data_3)
+            // are a hard-coded placeholder seed. For deployment, replace this
+            // sequence with bits from a real hardware TRNG (see Sec. VI-D of
+            // the SoteriaQ paper — TRNG design is out of scope of this repo).
             if (din_ready) begin
                     din_valid <= 1;
                     state_next1 <= stall_0;

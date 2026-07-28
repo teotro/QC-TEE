@@ -1,0 +1,35 @@
+# Simulator artifacts
+*.vcd
+*.wlf
+*.log
+*.jou
+*.pb
+transcript
+work/
+libs/
+xsim.dir/
+xilinx.log
+
+# Vivado / Xilinx
+.Xil/
+*.cache/
+*.hw/
+*.ip_user_files/
+*.runs/
+*.sim/
+*.srcs/
+*.gen/
+*.bit
+*.bin
+*.ltx
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
