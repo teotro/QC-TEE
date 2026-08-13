@@ -4,6 +4,7 @@ from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 from bitstring import BitArray
 
+import os
 import time
 import serial
 import argparse
@@ -33,7 +34,8 @@ sub_key = []
 
 value = get_random_bytes(16)
 
-myfile = open("../tb/DUMMY_ENCRYPTED_DATA.mem")
+mem_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hardware", "tb", "DUMMY_ENCRYPTED_DATA.mem")
+myfile = open(mem_path)
 
 bitmap = []
 
@@ -70,7 +72,7 @@ for i in range(0,16):
     print(c)
 
 
-# myfile = open("../tb/DUMMY_ENCRYPTED_DATA.mem")
+# myfile = open(mem_path)
 
 # bitmap = []
 

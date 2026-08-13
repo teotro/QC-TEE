@@ -46,190 +46,139 @@ the green "SoteriaQ" box:
 
 ```
 QC-TEE/
-├── top_with_fifo.v          Top of the security engine: crypto_engine +
-│                            main controller + SHAKE + bitmap memory +
-│                            shifter + switch FIFO.
-├── uart_top_no_fifo.v       FPGA-bring-up wrapper: UART RX/TX around
-│                            top_with_fifo. Uses the Xilinx BUFG primitive.
-├── main_controller.v        Main FSM. Two sub-FSMs:
-│                              (a) init → decrypt → SHAKE → encrypt → done
-│                              (b) SHAKE handshake protocol
-├── dec_enc_engine.v         crypto_engine — wraps AES_EncDec and sequences
-│                            block-by-block decrypt/encrypt over the bitmap
-│                            memory.
-├── shifter.v                128-bit → 7-bit shifter that streams bitmap
-│                            words into the switch FIFO (NUM_SWITCHES=7).
-├── clog2.v                  `CLOG2 / `DIVCLOG2 preprocessor macros.
+├── Makefile                 Top-level build entry point (see Quick start).
 │
-├── memory/
-│   ├── mem_dual.v           Dual-port BRAM (bitmap memory).
-│   └── mem_single.v         Single-port BRAM.
+├── hardware/                All RTL sources and constraints.
+│   ├── create_project.tcl   Vivado batch script: creates project, adds all
+│   │                        sources and constraints, sets top, runs
+│   │                        synthesis → implementation → bitstream.
+│   ├── constraints/
+│   │   └── Basys-3-Master.xdc  Pin constraints for the Basys-3 board.
+│   │
+│   ├── top_with_fifo.v      Top of the security engine: crypto_engine +
+│   │                        main controller + SHAKE + bitmap memory +
+│   │                        shifter + switch FIFO.
+│   ├── uart_top_no_fifo.v   FPGA bring-up wrapper: UART RX/TX around
+│   │                        top_with_fifo. Uses the Xilinx BUFG primitive.
+│   ├── main_controller.v    Main FSM. Two sub-FSMs:
+│   │                          (a) init → decrypt → SHAKE → encrypt → done
+│   │                          (b) SHAKE handshake protocol
+│   ├── dec_enc_engine.v     crypto_engine — wraps AES_EncDec and sequences
+│   │                        block-by-block decrypt/encrypt over bitmap memory.
+│   ├── shifter.v            128-bit → 7-bit shifter that streams bitmap
+│   │                        words into the switch FIFO (NUM_SWITCHES=7).
+│   ├── clog2.v              `CLOG2 / `DIVCLOG2 preprocessor macros.
+│   │
+│   ├── memory/
+│   │   ├── mem_dual.v       Dual-port BRAM (bitmap memory).
+│   │   └── fifo-orig.v      Synchronous FIFO (D. Gisselquist, public domain).
+│   │
+│   ├── uart/
+│   │   ├── rxuart.v         wbuart32 RX (Gisselquist, GPL).
+│   │   └── txuart.v         wbuart32 TX (Gisselquist, GPL).
+│   │
+│   ├── shake256/            SHAKE-256 (Keccak-f[1600]) core, Verilog port
+│   │   ├── keccak_top.v     of Bernhard Jungk's VHDL implementation,
+│   │   ├── control_path.v   adapted by Yale (J. Szefer, S. Tian).
+│   │   ├── data_path.v      Used here for post-processing / randomness
+│   │   ├── keccak_math.v    derivation between decrypt and encrypt phases.
+│   │   ├── keccak_pkg.v
+│   │   ├── state_ram.v
+│   │   ├── stateram_inference.v
+│   │   ├── transform.v
+│   │   ├── rc.v
+│   │   └── clog2.v          (Package-local copy; identical macros.)
+│   │
+│   ├── AES/                 GMU CAESAR AES-128 core (VHDL, GPL).
+│   │   ├── LICENSE.txt      GPLv3.
+│   │   ├── AES_EncDec_sources.txt  Build file list for the EncDec variant.
+│   │   └── src/             Core AES sources (Sbox, MixColumns, Round,
+│   │       ├── AES_EncDec.vhd      KeyUpdate, top-levels).
+│   │       ├── AES_EncDec_Datapath.vhd
+│   │       └── ...
+│   │
+│   └── tb/                  Verilog testbenches.
+│       ├── top_with_fifo_tb.v      Main integration TB.
+│       ├── decryption_engine_tb.v
+│       ├── decryption_encryption_engine_tb.v
+│       ├── dec_x_mem_tb.v
+│       ├── shifter_tb.v
+│       └── DUMMY_ENCRYPTED_DATA.mem  Six 128-bit test-vector bitmaps.
 │
-├── fifo/
-│   └── fifo-orig.v          Synchronous FIFO (D. Gisselquist, public domain).
+├── software/                Host-side FPGA bring-up scripts.
+│   ├── uart_loopback_test.py   Serial driver: sends block size + AES key +
+│   │                           encrypted bitmap, reads back decrypted
+│   │                           bitmap and RF-switch stream.
+│   └── utils.py                Helpers for building the input bitmap file
+│                               (decoy=1, original=0) and reshaping it to
+│                               128-bit words.
 │
-├── uart/
-│   ├── rxuart.v             wbuart32 RX (Gisselquist, GPL).
-│   └── txuart.v             wbuart32 TX (Gisselquist, GPL).
-│
-├── shake256/                SHAKE-256 (Keccak-f[1600]) core, Verilog port
-│   ├── keccak_top.v         of Bernhard Jungk's VHDL implementation,
-│   ├── control_path.v       adapted by Yale (J. Szefer, S. Tian).
-│   ├── data_path.v          Used here for post-processing / randomness
-│   ├── keccak_math.v        derivation between decrypt and encrypt phases.
-│   ├── keccak_pkg.v
-│   ├── state_ram.v
-│   ├── stateram_inference.v
-│   ├── transform.v
-│   ├── rc.v
-│   ├── clog2.v              (Package-local copy; identical macros.)
-│   └── tb/{tb.v, testvectors.v}
-│
-├── AES/                     GMU CAESAR AES-128 core (VHDL, GPL).
-│   ├── LICENSE.txt          GPLv3.
-│   ├── AES_Enc_sources.txt      Build lists — one file per top-level
-│   ├── AES_EncDec_sources.txt   AES flavor (Enc, EncDec, Enc_KOF).
-│   ├── AES_Enc_KOF_sources.txt  QC-TEE uses AES_EncDec.
-│   ├── src/                 Core AES sources (Sbox, MixColumns, Round,
-│   │   ├── AES_EncDec.vhd   KeyUpdate, top-levels, testbenches).
-│   │   ├── AES_EncDec_Datapath.vhd
-│   │   └── ...
-│   └── AES-GCM/             Full GMU AES-GCM AEAD (reference; not currently
-│       └── AES_GCM_GMU_v1.0/  wired into top_with_fifo).
-│
-├── tb/                      Verilog testbenches for the RTL.
-│   ├── top_with_fifo_tb.v   Main integration TB. Drives one AES key +
-│   │                        four 128-bit encrypted words, waits for
-│   │                        dec_enc_done and done_signal.
-│   ├── decryption_engine_tb.v
-│   ├── decryption_encryption_engine_tb.v
-│   ├── dec_x_mem_tb.v
-│   ├── shifter_tb.v
-│   └── DUMMY_ENCRYPTED_DATA.mem   Six 128-bit test-vector bitmaps.
-│
-└── python/                  Host-side FPGA bring-up scripts.
-    ├── uart_loopback_test.py   Serial driver: sends block size + AES key +
-    │                           encrypted bitmap, reads back decrypted
-    │                           bitmap and RF-switch stream.
-    └── utils.py                Helpers for building the input bitmap file
-                                (decoy=1, original=0) and reshaping it to
-                                128-bit words.
+└── vivado_proj/             Generated by `make bitstream` — not committed.
 ```
 
-## Reproducing the results
+## Quick start
 
-The paper's fidelity/correctness numbers come from noise-model simulation of
-21 QASMBench circuits on IBM `ibm_perth`, `ibm_algiers`, and the Aer
-simulator (Table II). That evaluation is *software*, orthogonal to this
-repository — this repo is the RTL that will run inside the fridge.
+### Prerequisites
 
-The flow below assumes **Xilinx Vivado (2020.1 or newer)** for both
-simulation (`xsim`) and synthesis. Vivado is used because the design is
-mixed-language: the AES core is VHDL and everything else is Verilog, and the
-FPGA wrapper `uart_top_no_fifo.v` instantiates the Xilinx `BUFG` primitive.
+- Xilinx Vivado 2020.1 or newer (for synthesis and bitstream generation).
+- Python 3 with `pyserial`, `pycryptodome`, and `bitstring` (for the host
+  bring-up script).
+- `make`.
 
-### 1. Simulate the top design with `xsim`
-
-Source Vivado's `settings64.sh` first, then from the repo root:
+### 1. Generate the bitstream
 
 ```bash
-# ---- 1a. Compile the VHDL AES core ----
-xvhdl \
-  AES/src/AES_pkg.vhd \
-  AES/src/AES_map.vhd  AES/src/AES_invmap.vhd \
-  AES/src/AES_Sbox.vhd AES/src/AES_InvSbox.vhd \
-  AES/src/AES_SubBytes.vhd AES/src/AES_InvSubBytes.vhd \
-  AES/src/AES_ShiftRows.vhd AES/src/AES_InvShiftRows.vhd \
-  AES/src/AES_mul.vhd \
-  AES/src/AES_MixColumn.vhd AES/src/AES_InvMixColumn.vhd \
-  AES/src/AES_MixColumns.vhd AES/src/AES_InvMixColumns.vhd \
-  AES/src/AES_Combined_Round.vhd \
-  AES/src/AES_KeyUpdate.vhd \
-  AES/src/AES_EncDec_Datapath.vhd \
-  AES/src/AES_EncDec_Control.vhd \
-  AES/src/AES_EncDec.vhd
-
-# ---- 1b. Compile the Verilog RTL ----
-xvlog -i . -i shake256 \
-  clog2.v shifter.v dec_enc_engine.v main_controller.v \
-  memory/mem_dual.v memory/mem_single.v \
-  fifo/fifo-orig.v \
-  shake256/keccak_pkg.v shake256/keccak_math.v \
-  shake256/rc.v shake256/transform.v \
-  shake256/state_ram.v shake256/stateram_inference.v \
-  shake256/data_path.v shake256/control_path.v shake256/keccak_top.v \
-  top_with_fifo.v \
-  tb/top_with_fifo_tb.v
-
-# ---- 1c. Elaborate and run ----
-xelab -debug typical -L work work.top_with_fifo_tb -s tb_snapshot
-xsim tb_snapshot -R
+make bitstream
 ```
 
-The testbench prints the cycle count between `start_signal`,
-`dec_enc_done`, and `done_signal`. A `top_with_fifo_tb.vcd` waveform is
-dumped in the working directory; open it with `xsim --gui` or any VCD
-viewer.
+This runs `hardware/create_project.tcl` in Vivado batch mode. It creates the
+project under `vivado_proj/`, adds all RTL and constraint sources, sets
+`uart_top_no_fifo` as top, and runs synthesis → implementation →
+`write_bitstream`. The finished bitstream is written to:
 
-### 2. Synthesize for a Xilinx FPGA with Vivado
-
-`uart_top_no_fifo.v` targets a Xilinx 7-series board (it instantiates a
-`BUFG` primitive). Create a Vivado project (GUI or Tcl) and add:
-
-- **Design sources (Verilog):** `top_with_fifo.v`, `uart_top_no_fifo.v`,
-  `main_controller.v`, `dec_enc_engine.v`, `shifter.v`, `clog2.v`,
-  `memory/mem_dual.v`, `memory/mem_single.v`, `fifo/fifo-orig.v`,
-  `uart/rxuart.v`, `uart/txuart.v`, and the entire `shake256/*.v` set.
-- **Design sources (VHDL, `work` library):** every file listed in
-  `AES/AES_EncDec_sources.txt` from `AES/src/`.
-- **Simulation sources:** `tb/top_with_fifo_tb.v` (plus any other TB from
-  `tb/` you want to try).
-- **Top module:** `uart_top_no_fifo`.
-- **Verilog include path:** repo root (for `` `include "clog2.v" ``) and
-  `shake256/` (for `keccak_pkg.v`).
-
-A minimal Tcl equivalent:
-
-```tcl
-create_project qc_tee ./qc_tee_proj -part xc7a100tcsg324-1 -force
-add_files -norecurse {
-  top_with_fifo.v uart_top_no_fifo.v main_controller.v dec_enc_engine.v
-  shifter.v clog2.v memory/mem_dual.v memory/mem_single.v
-  fifo/fifo-orig.v uart/rxuart.v uart/txuart.v
-}
-add_files -norecurse [glob shake256/*.v]
-add_files -norecurse [glob AES/src/*.vhd]
-add_files -fileset sim_1 -norecurse tb/top_with_fifo_tb.v
-set_property include_dirs [list [pwd] [pwd]/shake256] [get_filesets sources_1]
-set_property top uart_top_no_fifo [get_filesets sources_1]
-update_compile_order -fileset sources_1
-launch_runs synth_1 -jobs 4
+```
+vivado_proj/qc_tee.runs/impl_1/uart_top_no_fifo.bit
 ```
 
-Constraints you must supply in an XDC file for your board:
-- `clk_p` → system clock pin (100 MHz assumed; change `CLK_SPEED` in
-  `uart_top_no_fifo.v` if your board differs).
-- `uart_rx`, `uart_tx` → USB-UART pins.
-- `output_switches_wire[6:0]`, `flag1..3` → user IO / LEDs (7 RF-switch
-  drive outputs plus 3 debug flags).
+### 2. Program the FPGA
 
-### 3. Drive the FPGA from a host PC
+Open Vivado Hardware Manager, connect to the Basys-3 board, and program it
+with the bitstream above. Alternatively use `open_hw_manager` / `program_hw_devices`
+from the Vivado Tcl console.
 
-With the bitstream programmed onto the board, from `python/`:
+### 3. Run the UART loopback test
+
+Install Python dependencies once:
 
 ```bash
 pip install pyserial pycryptodome bitstring
-python3 uart_loopback_test.py -p /dev/ttyUSB1 -b 115200
 ```
 
+Then:
+
+```bash
+make loopback PORT=/dev/ttyUSB0 BAUD=115200
+```
+
+`PORT` defaults to `/dev/ttyUSB0` and `BAUD` to `115200`; override on the
+command line as needed.
+
 The script:
-1. Reads `../tb/DUMMY_ENCRYPTED_DATA.mem` (six lines of 128-bit binary),
+1. Reads `hardware/tb/DUMMY_ENCRYPTED_DATA.mem` (six 128-bit binary lines),
 2. Sends the block size (1 byte),
 3. Sends a hardcoded all-zero AES-128 key (edit `key = bytes.fromhex(...)`
-   to change this),
+   in `software/uart_loopback_test.py` to change it),
 4. AES-ECB-encrypts each bitmap word and sends it,
-5. Reads back the decrypted bitmap, the SHAKE-encrypted output bitmap,
-   and 112 bytes of RF-switch FIFO output.
+5. Reads back the decrypted bitmap, the SHAKE-encrypted output bitmap, and
+   112 bytes of RF-switch FIFO output.
+
+### Makefile targets
+
+| Target          | Description                                      |
+| --------------- | ------------------------------------------------ |
+| `make bitstream`| Run Vivado TCL to synthesise and generate bitstream (default). |
+| `make loopback` | Run the UART host script (FPGA must be programmed first). |
+| `make clean`    | Remove the generated `vivado_proj/` directory.   |
 
 ## Parameters and interfaces
 
